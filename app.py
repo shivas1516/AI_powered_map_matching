@@ -1,65 +1,84 @@
 from flask import Flask, render_template, request, redirect, url_for
 import folium
 import pandas as pd
+import osrm
 from hmmlearn import hmm
 import numpy as np
-import io
 
 app = Flask(__name__)
 
-# HMM Model initialization (this is a placeholder and should be customized based on your requirements)
-class MapMatchingHMM:
-    def __init__(self):
-        self.model = hmm.GaussianHMM(n_components=3, covariance_type="diag")
-    
-    def train(self, data):
-        # Training the HMM with vehicle trajectory data
-        self.model.fit(data)
-    
-    def predict(self, data):
-        # Predict the most likely sequence of states (map matching)
-        return self.model.predict(data)
+# Initialize OSRM client
+osrm_client = osrm.Client(host='http://router.project-osrm.org')
+
+def hmm_algorithm(data):
+    X = np.array([[d['lat'], d['lon']] for d in data])
+    model = hmm.GaussianHMM(n_components=5, covariance_type="full")
+    model.fit(X)
+    hidden_states = model.predict(X)
+    for i, d in enumerate(data):
+        d['hidden_state'] = int(hidden_states[i])
+    return data
+
+def map_matching(data):
+    coordinates = [[d['lon'], d['lat']] for d in data]
+    response = osrm_client.match(coordinates=coordinates)
+    matched_points = []
+    for tracepoint in response['tracepoints']:
+        if tracepoint is not None:
+            matched_points.append({
+                'lat': tracepoint['location'][1],
+                'lon': tracepoint['location'][0]
+            })
+    return matched_points
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/upload', methods=['POST'])
+@app.route('/upload_file', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
         return redirect(url_for('index'))
-    
     file = request.files['file']
     if file.filename == '':
         return redirect(url_for('index'))
-    
-    # Read CSV file into DataFrame
-    if file:
-        stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
-        data = pd.read_csv(stream)
-        data_points = data[['latitude', 'longitude']].values
+    if file and file.filename.endswith('.csv'):
+        df = pd.read_csv(file)
+        data = df.to_dict('records')
         
-        # Map Matching with HMM (Dummy Model)
-        map_matcher = MapMatchingHMM()
-        map_matcher.train(data_points)
-        predicted_route = map_matcher.predict(data_points)
+        # Apply HMM algorithm
+        hmm_result = hmm_algorithm(data)
         
-        # Create Map
-        map_ = folium.Map(location=[data['latitude'].mean(), data['longitude'].mean()], zoom_start=12)
+        # Apply map matching
+        matched_result = map_matching(hmm_result)
         
-        # Mark Points and Route
-        for i, (lat, lon) in enumerate(data_points):
-            folium.Marker([lat, lon], popup=f"Point {i}, State {predicted_route[i]}").add_to(map_)
+        # Create map
+        m = folium.Map(location=[matched_result[0]['lat'], matched_result[0]['lon']], zoom_start=13)
         
-        # Save map to HTML file
-        map_.save('templates/map.html')
+        # Add original points
+        for point in data:
+            folium.Marker(
+                [point['lat'], point['lon']],
+                popup=f"Original: {point['lat']}, {point['lon']}",
+                icon=folium.Icon(color='blue', icon='info-sign')
+            ).add_to(m)
         
-        return redirect(url_for('display_map'))
+        # Add matched points and connect them
+        matched_coords = [(point['lat'], point['lon']) for point in matched_result]
+        folium.PolyLine(matched_coords, color="red", weight=2.5, opacity=1).add_to(m)
+        
+        for point in matched_result:
+            folium.Marker(
+                [point['lat'], point['lon']],
+                popup=f"Matched: {point['lat']}, {point['lon']}",
+                icon=folium.Icon(color='red', icon='info-sign')
+            ).add_to(m)
+        
+        # Save the map
+        m.save('static/map.html')
+        
+        return redirect(url_for('index'))
     return redirect(url_for('index'))
-
-@app.route('/map')
-def display_map():
-    return render_template('map.html')
 
 if __name__ == '__main__':
     app.run(debug=True)
