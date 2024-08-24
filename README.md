@@ -15,7 +15,7 @@ Follow these steps to set up and run the project:
 1. **Clone the Repository:**
 
     ```bash
-    git clone https://github.com/yourusername/map-matching-hmm.git
+    https://github.com/shivas1516/map-matching.git
     cd map-matching-hmm
     ```
 
