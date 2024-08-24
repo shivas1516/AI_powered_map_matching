@@ -69,7 +69,7 @@ Follow these steps to set up and run the project:
 Here's an example of how your CSV file might look:
 
 ```csv
-lat,lon,timestamp
+latitude, longitude,timestamp
 40.7128,-74.0060,2023-08-24 10:00:00
 40.7129,-74.0061,2023-08-24 10:00:10
 40.7130,-74.0062,2023-08-24 10:00:20
