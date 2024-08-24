@@ -68,11 +68,8 @@ Follow these steps to set up and run the project:
 
 Here's an example of how your CSV file might look:
 
-```csv
-latitude, longitude,timestamp
-40.7128,-74.0060,2023-08-24 10:00:00
-40.7129,-74.0061,2023-08-24 10:00:10
-40.7130,-74.0062,2023-08-24 10:00:20
-40.7131,-74.0063,2023-08-24 10:00:30
+Download as CSV
+
+https://docs.google.com/spreadsheets/d/1rFiZ5-uP_227DsbvBewnovyaNmUj9N3ahw3tFGkjjFI/edit?usp=drivesdk
 
 Save this as trajectory_data.csv and upload it through the web interface to see the results.
