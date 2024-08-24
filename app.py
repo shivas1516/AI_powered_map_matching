@@ -1,5 +1,4 @@
 from flask import Flask, render_template, request, redirect, url_for
-import folium
 import pandas as pd
 import numpy as np
 from pytrack.graph import graph, distance
@@ -32,12 +31,7 @@ def perform_map_matching(points):
     # Perform the map-matching process
     path_prob, predecessor = mpmatching.viterbi_search(G_interp, trellis, "start", "target")
     
-    # Extract matched points
-    matched_coords = []
-    for state in path_prob:
-        matched_coords.append(G.nodes[state]['y'], G.nodes[state]['x'])
-    
-    return G, matched_coords
+    return G, G_interp, candidates, trellis, path_prob, predecessor
 
 @app.route('/')
 def index():
@@ -54,31 +48,23 @@ def upload_file():
         points = load_and_process_data(file)
         
         # Perform map matching using pytrack
-        G, matched_result = perform_map_matching(points)
+        G, G_interp, candidates, trellis, path_prob, predecessor = perform_map_matching(points)
         
-        # Create map
-        m = folium.Map(location=[matched_result[0][0], matched_result[0][1]], zoom_start=13)
+        # Create a map centered at the first point
+        loc = (np.mean([p[0] for p in points]), np.mean([p[1] for p in points]))
+        maps = visualization.Map(location=loc, zoom_start=15)
         
-        # Add original points
-        for point in points:
-            folium.Marker(
-                [point[0], point[1]],
-                popup=f"Original: {point[0]}, {point[1]}",
-                icon=folium.Icon(color='blue', icon='info-sign')
-            ).add_to(m)
+        # Add the graph to the map
+        maps.add_graph(G, plot_nodes=True)
         
-        # Add matched points and connect them
-        folium.PolyLine(matched_result, color="red", weight=2.5, opacity=1).add_to(m)
+        # Draw the candidates on the map
+        maps.draw_candidates(candidates, 30)
         
-        for point in matched_result:
-            folium.Marker(
-                [point[0], point[1]],
-                popup=f"Matched: {point[0]}, {point[1]}",
-                icon=folium.Icon(color='red', icon='info-sign')
-            ).add_to(m)
+        # Draw the map-matching path
+        maps.draw_path(G_interp, trellis, predecessor)
         
-        # Save the map
-        m.save('static/map.html')
+        # Save the map visualization as an HTML file
+        maps.save('static/map.html')
         
         return redirect(url_for('index'))
     return redirect(url_for('index'))
