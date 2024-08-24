@@ -1,35 +1,43 @@
 from flask import Flask, render_template, request, redirect, url_for
 import folium
 import pandas as pd
-import osrm
-from hmmlearn import hmm
 import numpy as np
+from pytrack.graph import graph, distance
+from pytrack.analytics import visualization
+from pytrack.matching import candidate, mpmatching_utils, mpmatching
 
 app = Flask(__name__)
 
-# Initialize OSRM client
-osrm_client = osrm.Client(host='http://router.project-osrm.org')
+def load_and_process_data(file):
+    df = pd.read_csv(file)
+    latitude = df["latitude"].to_list()
+    longitude = df["longitude"].to_list()
+    points = [(lat, lon) for lat, lon in zip(latitude, longitude)]
+    return points
 
-def hmm_algorithm(data):
-    X = np.array([[d['lat'], d['lon']] for d in data])
-    model = hmm.GaussianHMM(n_components=5, covariance_type="full")
-    model.fit(X)
-    hidden_states = model.predict(X)
-    for i, d in enumerate(data):
-        d['hidden_state'] = int(hidden_states[i])
-    return data
-
-def map_matching(data):
-    coordinates = [[d['lon'], d['lat']] for d in data]
-    response = osrm_client.match(coordinates=coordinates)
-    matched_points = []
-    for tracepoint in response['tracepoints']:
-        if tracepoint is not None:
-            matched_points.append({
-                'lat': tracepoint['location'][1],
-                'lon': tracepoint['location'][0]
-            })
-    return matched_points
+def perform_map_matching(points):
+    # Create BBOX
+    north, east = np.max(np.array([*points]), 0)
+    south, west = np.min(np.array([*points]), 0)
+    
+    # Extract road graph
+    G = graph.graph_from_bbox(*distance.enlarge_bbox(north, south, west, east, 500), simplify=True, network_type='drive')
+    
+    # Extract candidates
+    G_interp, candidates = candidate.get_candidates(G, points, interp_dist=5, closest=True, radius=30)
+    
+    # Extract trellis DAG graph
+    trellis = mpmatching_utils.create_trellis(candidates)
+    
+    # Perform the map-matching process
+    path_prob, predecessor = mpmatching.viterbi_search(G_interp, trellis, "start", "target")
+    
+    # Extract matched points
+    matched_coords = []
+    for state in path_prob:
+        matched_coords.append(G.nodes[state]['y'], G.nodes[state]['x'])
+    
+    return G, matched_coords
 
 @app.route('/')
 def index():
@@ -43,34 +51,29 @@ def upload_file():
     if file.filename == '':
         return redirect(url_for('index'))
     if file and file.filename.endswith('.csv'):
-        df = pd.read_csv(file)
-        data = df.to_dict('records')
+        points = load_and_process_data(file)
         
-        # Apply HMM algorithm
-        hmm_result = hmm_algorithm(data)
-        
-        # Apply map matching
-        matched_result = map_matching(hmm_result)
+        # Perform map matching using pytrack
+        G, matched_result = perform_map_matching(points)
         
         # Create map
-        m = folium.Map(location=[matched_result[0]['lat'], matched_result[0]['lon']], zoom_start=13)
+        m = folium.Map(location=[matched_result[0][0], matched_result[0][1]], zoom_start=13)
         
         # Add original points
-        for point in data:
+        for point in points:
             folium.Marker(
-                [point['lat'], point['lon']],
-                popup=f"Original: {point['lat']}, {point['lon']}",
+                [point[0], point[1]],
+                popup=f"Original: {point[0]}, {point[1]}",
                 icon=folium.Icon(color='blue', icon='info-sign')
             ).add_to(m)
         
         # Add matched points and connect them
-        matched_coords = [(point['lat'], point['lon']) for point in matched_result]
-        folium.PolyLine(matched_coords, color="red", weight=2.5, opacity=1).add_to(m)
+        folium.PolyLine(matched_result, color="red", weight=2.5, opacity=1).add_to(m)
         
         for point in matched_result:
             folium.Marker(
-                [point['lat'], point['lon']],
-                popup=f"Matched: {point['lat']}, {point['lon']}",
+                [point[0], point[1]],
+                popup=f"Matched: {point[0]}, {point[1]}",
                 icon=folium.Icon(color='red', icon='info-sign')
             ).add_to(m)
         
